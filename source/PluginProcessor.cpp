@@ -99,7 +99,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
             juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
-            juce::ParameterID { makeBandParameterId (prefix, "MakeupGain"), 1 },
+            juce::ParameterID { makeBandParameterId (prefix, "Makeup"), 1 },
             name + " Makeup Gain", gainRange, 0.0f,
             juce::AudioParameterFloatAttributes().withLabel ("dB")));
     }
@@ -126,7 +126,7 @@ void PluginProcessor::cacheParameterPointers()
         pointers.ratio = parameters.getRawParameterValue (makeBandParameterId (prefix, "Ratio"));
         pointers.attack = parameters.getRawParameterValue (makeBandParameterId (prefix, "Attack"));
         pointers.release = parameters.getRawParameterValue (makeBandParameterId (prefix, "Release"));
-        pointers.makeupGain = parameters.getRawParameterValue (makeBandParameterId (prefix, "MakeupGain"));
+        pointers.makeupGain = parameters.getRawParameterValue (makeBandParameterId (prefix, "Makeup"));
     }
 }
 

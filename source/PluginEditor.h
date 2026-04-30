@@ -1,8 +1,10 @@
 #pragma once
 
 #include "PluginProcessor.h"
-#include "BinaryData.h"
-#include "melatonin_inspector/melatonin_inspector.h"
+
+#include <array>
+#include <memory>
+#include <vector>
 
 //==============================================================================
 class PluginEditor : public juce::AudioProcessorEditor
@@ -16,10 +18,23 @@ public:
     void resized() override;
 
 private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
+    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+
+    struct Control
+    {
+        juce::Slider slider;
+        juce::Label label;
+    };
+
+    void addControl (size_t index, const juce::String& labelText, const juce::String& parameterId);
+    static void configureSlider (juce::Slider& slider);
+
     PluginProcessor& processorRef;
-    std::unique_ptr<melatonin::Inspector> inspector;
-    juce::TextButton inspectButton { "Inspect the UI" };
+
+    juce::Label titleLabel;
+    std::array<juce::GroupComponent, 3> bandGroups;
+    std::array<Control, 18> controls;
+    std::vector<std::unique_ptr<SliderAttachment>> attachments;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };
