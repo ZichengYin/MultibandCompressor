@@ -4,9 +4,6 @@ cmake_minimum_required(VERSION 3.25)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include (PamplejuceVersion)
 
-# Modern concise way to add dependencies to your project
-include (CPM)
-
 # Configures universal binaries and decides which version of macOS to support
 include(PamplejuceMacOS)
 
@@ -17,7 +14,7 @@ include(JUCEDefaults)
 # This is the internal name of the project and the name of JUCE's shared code target
 # Note: This cannot have spaces (it may be 2024, but you can't have it all!)
 # Worry not, JUCE's PRODUCT_NAME can have spaces (and is what DAWs display)
-set(PROJECT_NAME "Pamplejuce")
+set(PROJECT_NAME "MultibandCompressor")
 
 # Worry not, JUCE's PRODUCT_NAME can have spaces (and is what DAWs will display)
 # You can also just have it be the same thing as PROJECT_NAME
@@ -25,17 +22,17 @@ set(PROJECT_NAME "Pamplejuce")
 #   set(PROJECT_NAME "MyPlugin_v${MAJOR_VERSION}")
 # Doing so enables major versions to show up in IDEs and DAWs as separate plugins
 # allowing you to change parameters and behavior without breaking existing user projects
-set(PRODUCT_NAME "Pamplejuce Demo")
+set(PRODUCT_NAME "Multiband Compressor")
 
 # Change me! Used for the MacOS bundle name and Installers
-set(COMPANY_NAME "Pamplejuce Company")
+set(COMPANY_NAME "Zicheng Yin")
 
 # Change me! Used for the MacOS bundle identifier (and signing)
-set(BUNDLE_ID "com.pamplejuce.pamplejuce")
+set(BUNDLE_ID "com.zichengyin.multibandcompressor")
 
 # Change me! Set the plugin formats you want built
 # Valid choices: AAX Unity VST VST3 AU AUv3 Standalone
-set(FORMATS Standalone AU VST3 AUv3)
+set(FORMATS VST3)
 
 # Force JUCE to work with sccache
 # instruct MSVC to embed debug info (/Z7) instead of emitting a .pdb
@@ -48,14 +45,21 @@ project(${PROJECT_NAME} VERSION ${CURRENT_VERSION})
 # Log build environment info (after project() so compiler info is available)
 include(PamplejuceLog)
 
-# JUCE is setup as a submodule in the /JUCE folder
-# Locally, you must run `git submodule update --init --recursive` once
-# and later `git submodule update --remote --merge` to keep it up to date
-# On Github Actions, this is done as a part of actions/checkout
-add_subdirectory(JUCE)
+# Use a local JUCE checkout. Override with:
+#   cmake -B Builds -DJUCE_PATH=D:/path/to/JUCE
+set(JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/JUCE" CACHE PATH "Path to a local JUCE checkout")
 
-# Add CLAP format
-add_subdirectory(modules/clap-juce-extensions EXCLUDE_FROM_ALL)
+if(NOT EXISTS "${JUCE_PATH}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "JUCE_PATH must point to a local JUCE checkout containing CMakeLists.txt. "
+        "Current value: ${JUCE_PATH}")
+endif()
+
+add_subdirectory("${JUCE_PATH}" "${CMAKE_BINARY_DIR}/JUCE")
+
+if("CLAP" IN_LIST FORMATS)
+    add_subdirectory(modules/clap-juce-extensions EXCLUDE_FROM_ALL)
+endif()
 
 # Add any other modules you want modules here, before the juce_add_plugin call
 # juce_add_module(modules/my_module)
@@ -78,12 +82,12 @@ juce_add_plugin("${PROJECT_NAME}"
     # Change me!
     # A four-character plugin id
     # First character MUST be uppercase for AU formats
-    PLUGIN_MANUFACTURER_CODE Pamp
+    PLUGIN_MANUFACTURER_CODE ZyIn
 
     # Change me!
     # A unique four-character plugin id
     # Note: this must have at least one upper-case character
-    PLUGIN_CODE P001
+    PLUGIN_CODE ZcYc
     FORMATS "${FORMATS}"
 
     # The name of your final executable
@@ -96,9 +100,11 @@ juce_add_plugin("${PROJECT_NAME}"
 # Without running into ODR violations
 add_library(SharedCode INTERFACE)
 
-clap_juce_extensions_plugin(TARGET "${PROJECT_NAME}"
-    CLAP_ID "${BUNDLE_ID}"
-    CLAP_FEATURES audio-effect)
+if("CLAP" IN_LIST FORMATS)
+    clap_juce_extensions_plugin(TARGET "${PROJECT_NAME}"
+        CLAP_ID "${BUNDLE_ID}"
+        CLAP_FEATURES audio-effect)
+endif()
 
 # Enable fast math, C++20 and a few other target defaults
 include(SharedCodeDefaults)
@@ -135,7 +141,7 @@ target_compile_definitions(SharedCode
     VERSION="${CURRENT_VERSION}"
 
     # JucePlugin_Name is for some reason doesn't use the nicer PRODUCT_NAME
-    PRODUCT_NAME_WITHOUT_VERSION="Pamplejuce"
+    PRODUCT_NAME_WITHOUT_VERSION="Multiband Compressor"
 )
 
 # Link to any other modules you added (with juce_add_module) here!
@@ -159,8 +165,11 @@ target_link_libraries(SharedCode
 # Link the JUCE plugin targets our SharedCode target
 target_link_libraries("${PROJECT_NAME}" PRIVATE SharedCode)
 
-# IPP support, comment out to disable
-include(PamplejuceIPP)
+# Optional IPP support. Disabled by default so configuration never downloads IPP packages.
+option(PAMPLEJUCE_ENABLE_IPP "Enable Intel IPP support when available locally" OFF)
+if(PAMPLEJUCE_ENABLE_IPP)
+    include(PamplejuceIPP)
+endif()
 
 # Everything related to the tests target
 include(Tests)
