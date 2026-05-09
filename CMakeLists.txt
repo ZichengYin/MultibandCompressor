@@ -32,7 +32,7 @@ set(BUNDLE_ID "com.zichengyin.multibandcompressor")
 
 # Change me! Set the plugin formats you want built
 # Valid choices: AAX Unity VST VST3 AU AUv3 Standalone
-set(FORMATS VST3)
+set(FORMATS Standalone)
 
 # Force JUCE to work with sccache
 # instruct MSVC to embed debug info (/Z7) instead of emitting a .pdb

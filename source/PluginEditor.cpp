@@ -14,6 +14,31 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     titleLabel.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     addAndMakeVisible (titleLabel);
 
+    openButton.onClick = [this] { openAudioFile(); };
+    playButton.onClick = [this] { processorRef.playLoadedFile(); updateStatusText(); };
+    stopButton.onClick = [this] { processorRef.stopLoadedFile(); updateStatusText(); };
+    recordButton.onClick = [this] {
+        if (processorRef.isRecording())
+            processorRef.stopRecording();
+        else
+            chooseRecordingFile();
+
+        updateStatusText();
+    };
+
+    for (auto* button : { &openButton, &playButton, &stopButton, &recordButton })
+    {
+        button->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff252a30));
+        button->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff8b2f2f));
+        button->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        addAndMakeVisible (*button);
+    }
+
+    statusLabel.setText ("No file loaded", juce::dontSendNotification);
+    statusLabel.setJustificationType (juce::Justification::centredLeft);
+    statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xffd6dde3));
+    addAndMakeVisible (statusLabel);
+
     for (size_t i = 0; i < bandGroups.size(); ++i)
     {
         bandGroups[i].setText (bandNames[i]);
@@ -46,6 +71,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     addControl (index++, "Makeup", "highMakeup");
 
     setSize (1120, 640);
+    startTimerHz (8);
 }
 
 PluginEditor::~PluginEditor()
@@ -90,11 +116,89 @@ void PluginEditor::paint (juce::Graphics& g)
     g.fillRect (bounds);
 }
 
+void PluginEditor::timerCallback()
+{
+    updateStatusText();
+}
+
+void PluginEditor::openAudioFile()
+{
+    fileChooser = std::make_unique<juce::FileChooser> ("Choose an audio file to process",
+                                                       juce::File{},
+                                                       "*.wav;*.aiff;*.aif;*.flac;*.mp3;*.ogg");
+
+    const auto browserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+    const juce::Component::SafePointer<PluginEditor> safeThis (this);
+
+    fileChooser->launchAsync (browserFlags, [safeThis] (const juce::FileChooser& chooser) {
+        if (safeThis == nullptr)
+            return;
+
+        const auto file = chooser.getResult();
+
+        if (file.existsAsFile())
+        {
+            const auto loaded = safeThis->processorRef.loadAudioFile (file);
+            safeThis->statusLabel.setText (loaded ? "Loaded: " + file.getFileName()
+                                                  : "Could not load: " + file.getFileName(),
+                                           juce::dontSendNotification);
+        }
+    });
+}
+
+void PluginEditor::chooseRecordingFile()
+{
+    fileChooser = std::make_unique<juce::FileChooser> ("Save processed output as WAV",
+                                                       juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                                                           .getChildFile ("Multiband Compressor Output.wav"),
+                                                       "*.wav");
+
+    const auto browserFlags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles;
+    const juce::Component::SafePointer<PluginEditor> safeThis (this);
+
+    fileChooser->launchAsync (browserFlags, [safeThis] (const juce::FileChooser& chooser) {
+        if (safeThis == nullptr)
+            return;
+
+        const auto file = chooser.getResult();
+
+        if (file != juce::File{})
+        {
+            const auto recording = safeThis->processorRef.startRecordingToFile (file);
+            safeThis->statusLabel.setText (recording ? "Recording to: " + file.withFileExtension (".wav").getFileName()
+                                                     : "Could not start recording",
+                                           juce::dontSendNotification);
+        }
+    });
+}
+
+void PluginEditor::updateStatusText()
+{
+    auto status = processorRef.getLoadedFileName();
+
+    if (processorRef.isPlayingLoadedFile())
+        status += " | Playing";
+
+    if (processorRef.isRecording())
+        status += " | Recording";
+
+    statusLabel.setText (status, juce::dontSendNotification);
+    recordButton.setButtonText (processorRef.isRecording() ? "Stop Rec" : "Record WAV");
+}
+
 void PluginEditor::resized()
 {
     auto area = getLocalBounds().reduced (20);
     titleLabel.setBounds (area.removeFromTop (42));
     area.removeFromTop (10);
+
+    auto transportArea = area.removeFromTop (44);
+    openButton.setBounds (transportArea.removeFromLeft (130).reduced (4));
+    playButton.setBounds (transportArea.removeFromLeft (90).reduced (4));
+    stopButton.setBounds (transportArea.removeFromLeft (90).reduced (4));
+    recordButton.setBounds (transportArea.removeFromLeft (130).reduced (4));
+    statusLabel.setBounds (transportArea.reduced (10, 4));
+    area.removeFromTop (8);
 
     auto crossoverArea = area.removeFromTop (145);
     const auto topControlWidth = crossoverArea.getWidth() / 3;

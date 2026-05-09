@@ -45,11 +45,15 @@ PluginProcessor::PluginProcessor()
                       ),
       parameters (*this, nullptr, parameterTreeId, createParameterLayout())
 {
+    formatManager.registerBasicFormats();
+    recordingThread.startThread();
     cacheParameterPointers();
 }
 
 PluginProcessor::~PluginProcessor()
 {
+    stopRecording();
+    transportSource.setSource (nullptr);
 }
 
 //==============================================================================
@@ -262,6 +266,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     lowMidSplitter.prepare (spec);
     midHighSplitter.prepare (spec);
+    transportSource.prepareToPlay (samplesPerBlock, sampleRate);
 
     for (auto& compressor : compressors)
         compressor.prepare (sampleRate, juce::jmax (1, getTotalNumOutputChannels()));
@@ -278,6 +283,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
 void PluginProcessor::releaseResources()
 {
+    transportSource.releaseResources();
 }
 
 bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -348,6 +354,22 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (auto channel = totalNumInputChannels; channel < totalNumOutputChannels; ++channel)
         buffer.clear (channel, 0, numSamples);
 
+    auto usingFilePlayback = false;
+
+    {
+        const juce::ScopedLock lock (transportLock);
+
+        if (readerSource != nullptr)
+        {
+            buffer.clear();
+            juce::AudioSourceChannelInfo info (&buffer, 0, numSamples);
+            transportSource.getNextAudioBlock (info);
+            usingFilePlayback = true;
+        }
+    }
+
+    const auto channelsToProcess = usingFilePlayback ? totalNumOutputChannels : totalNumInputChannels;
+
     ensureBufferSize (totalNumOutputChannels, numSamples);
     updateDSPParameters();
 
@@ -356,7 +378,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     midBandBuffer.clear();
     highBandBuffer.clear();
 
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    for (int channel = 0; channel < channelsToProcess; ++channel)
     {
         const auto* input = dryBuffer.getReadPointer (channel);
         auto* low = lowBandBuffer.getWritePointer (channel);
@@ -382,7 +404,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         auto& bandBuffer = *bandBuffers[static_cast<size_t> (band)];
         auto& compressor = compressors[static_cast<size_t> (band)];
 
-        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        for (int channel = 0; channel < channelsToProcess; ++channel)
         {
             auto* samples = bandBuffer.getWritePointer (channel);
 
@@ -394,7 +416,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const auto wet = juce::jlimit (0.0f, 1.0f, dryWet->load() / 100.0f);
     const auto dry = 1.0f - wet;
 
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    for (int channel = 0; channel < channelsToProcess; ++channel)
     {
         const auto* drySamples = dryBuffer.getReadPointer (channel);
         const auto* low = lowBandBuffer.getReadPointer (channel);
@@ -408,6 +430,125 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             output[sample] = drySamples[sample] * dry + wetSample * wet;
         }
     }
+
+    writeRecordingBlock (buffer, numSamples);
+}
+
+bool PluginProcessor::loadAudioFile (const juce::File& file)
+{
+    if (! file.existsAsFile())
+        return false;
+
+    std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
+
+    if (reader == nullptr)
+        return false;
+
+    const auto readerSampleRate = reader->sampleRate;
+    auto newSource = std::make_unique<juce::AudioFormatReaderSource> (reader.release(), true);
+
+    {
+        const juce::ScopedLock lock (transportLock);
+        transportSource.stop();
+        transportSource.setSource (newSource.get(), 0, nullptr, readerSampleRate);
+        readerSource = std::move (newSource);
+        loadedAudioFile = file;
+    }
+
+    return true;
+}
+
+void PluginProcessor::playLoadedFile()
+{
+    const juce::ScopedLock lock (transportLock);
+
+    if (readerSource != nullptr)
+    {
+        if (transportSource.getCurrentPosition() >= transportSource.getLengthInSeconds())
+            transportSource.setPosition (0.0);
+
+        transportSource.start();
+    }
+}
+
+void PluginProcessor::stopLoadedFile()
+{
+    const juce::ScopedLock lock (transportLock);
+    transportSource.stop();
+}
+
+bool PluginProcessor::isAudioFileLoaded() const
+{
+    const juce::ScopedLock lock (transportLock);
+    return readerSource != nullptr;
+}
+
+bool PluginProcessor::isPlayingLoadedFile() const
+{
+    return transportSource.isPlaying();
+}
+
+juce::String PluginProcessor::getLoadedFileName() const
+{
+    const juce::ScopedLock lock (transportLock);
+    return loadedAudioFile.existsAsFile() ? loadedAudioFile.getFileName() : "No file loaded";
+}
+
+bool PluginProcessor::startRecordingToFile (const juce::File& file)
+{
+    stopRecording();
+
+    auto target = file;
+
+    if (! target.hasFileExtension (".wav"))
+        target = target.withFileExtension (".wav");
+
+    target.deleteFile();
+
+    std::unique_ptr<juce::OutputStream> stream (target.createOutputStream().release());
+
+    if (stream == nullptr)
+        return false;
+
+    auto options = juce::AudioFormatWriterOptions()
+                       .withSampleRate (currentSampleRate)
+                       .withNumChannels (juce::jmax (1, getTotalNumOutputChannels()))
+                       .withBitsPerSample (24);
+
+    auto writer = wavFormat.createWriterFor (stream, options);
+
+    if (writer == nullptr)
+        return false;
+
+    auto newWriter = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), recordingThread, 32768);
+
+    {
+        const juce::ScopedLock lock (writerLock);
+        threadedWriter = std::move (newWriter);
+        activeWriter = threadedWriter.get();
+    }
+
+    return true;
+}
+
+void PluginProcessor::stopRecording()
+{
+    const juce::ScopedLock lock (writerLock);
+    activeWriter = nullptr;
+    threadedWriter.reset();
+}
+
+bool PluginProcessor::isRecording() const
+{
+    return activeWriter != nullptr;
+}
+
+void PluginProcessor::writeRecordingBlock (const juce::AudioBuffer<float>& buffer, int numSamples)
+{
+    const juce::ScopedLock lock (writerLock);
+
+    if (activeWriter != nullptr)
+        activeWriter->write (buffer.getArrayOfReadPointers(), numSamples);
 }
 
 //==============================================================================

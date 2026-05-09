@@ -1,6 +1,8 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_dsp/juce_dsp.h>
 
 #include <array>
@@ -37,6 +39,17 @@ public:
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
+
+    bool loadAudioFile (const juce::File& file);
+    void playLoadedFile();
+    void stopLoadedFile();
+    bool isAudioFileLoaded() const;
+    bool isPlayingLoadedFile() const;
+    juce::String getLoadedFileName() const;
+
+    bool startRecordingToFile (const juce::File& file);
+    void stopRecording();
+    bool isRecording() const;
 
     juce::AudioProcessorValueTreeState parameters;
 
@@ -86,6 +99,7 @@ private:
     void cacheParameterPointers();
     void updateDSPParameters();
     void ensureBufferSize (int numChannels, int numSamples);
+    void writeRecordingBlock (const juce::AudioBuffer<float>& buffer, int numSamples);
 
     static constexpr auto numBands = static_cast<int> (Band::count);
 
@@ -105,6 +119,18 @@ private:
     std::atomic<float>* freqMid = nullptr;
     std::atomic<float>* dryWet = nullptr;
     std::array<BandParameterPointers, numBands> bandParameters;
+
+    juce::AudioFormatManager formatManager;
+    juce::AudioTransportSource transportSource;
+    std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
+    juce::File loadedAudioFile;
+    mutable juce::CriticalSection transportLock;
+
+    juce::TimeSliceThread recordingThread { "Audio Recorder Thread" };
+    juce::WavAudioFormat wavFormat;
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> threadedWriter;
+    juce::AudioFormatWriter::ThreadedWriter* activeWriter = nullptr;
+    mutable juce::CriticalSection writerLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)
 };
