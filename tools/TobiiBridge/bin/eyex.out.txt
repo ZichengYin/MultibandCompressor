@@ -1,0 +1,4 @@
+Tobii connection state: TryingToConnect
+Tobii EyeX bridge started.
+Sending gaze X/Y to UDP 127.0.0.1:4242
+Press Ctrl+C to stop.

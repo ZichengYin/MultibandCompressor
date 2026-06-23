@@ -158,12 +158,24 @@ target_link_libraries(SharedCode
     juce_dsp
     juce_gui_basics
     juce_gui_extra
+    juce_osc
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
 # Link the JUCE plugin targets our SharedCode target
 target_link_libraries("${PROJECT_NAME}" PRIVATE SharedCode)
+
+# Keep the GazeOSC runtime beside the standalone executable so eye tracking can
+# be started automatically without a second manual launch.
+set(GAZEOSC_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/GazeOSC")
+if(WIN32 AND EXISTS "${GAZEOSC_RUNTIME_DIR}/gazeOSC.exe")
+    add_custom_command(TARGET "${PROJECT_NAME}_Standalone" POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${GAZEOSC_RUNTIME_DIR}"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}_Standalone>/GazeOSC"
+        COMMENT "Copying the GazeOSC runtime beside the standalone application")
+endif()
 
 # Optional IPP support. Disabled by default so configuration never downloads IPP packages.
 option(PAMPLEJUCE_ENABLE_IPP "Enable Intel IPP support when available locally" OFF)

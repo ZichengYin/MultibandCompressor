@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EyeTrackerManager.h"
 #include "PluginProcessor.h"
 
 #include <array>
@@ -33,6 +34,8 @@ private:
     void openAudioFile();
     void chooseRecordingFile();
     void updateStatusText();
+    void applyEyeControlAction (EyeTrackerManager::Action action);
+    void setParameterValue (const juce::String& parameterId, float value);
 
     PluginProcessor& processorRef;
 
@@ -41,11 +44,14 @@ private:
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
     juce::TextButton recordButton { "Record WAV" };
+    juce::ToggleButton eyeControlButton { "4-Zone Eye Control" };
     juce::Label statusLabel;
+    juce::Label gazeStatusLabel;
     std::array<juce::GroupComponent, 3> bandGroups;
     std::array<Control, 18> controls;
     std::vector<std::unique_ptr<SliderAttachment>> attachments;
     std::unique_ptr<juce::FileChooser> fileChooser;
+    EyeTrackerManager eyeTracker;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };

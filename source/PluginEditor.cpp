@@ -25,6 +25,10 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
         updateStatusText();
     };
+    eyeControlButton.onClick = [this] {
+        eyeTracker.setEnabled (eyeControlButton.getToggleState());
+        gazeStatusLabel.setVisible (eyeTracker.isEnabled());
+    };
 
     for (auto* button : { &openButton, &playButton, &stopButton, &recordButton })
     {
@@ -34,10 +38,19 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         addAndMakeVisible (*button);
     }
 
+    eyeControlButton.setColour (juce::ToggleButton::textColourId, juce::Colours::white);
+    eyeControlButton.setColour (juce::ToggleButton::tickColourId, juce::Colour (0xfff2b84b));
+    addAndMakeVisible (eyeControlButton);
+
     statusLabel.setText ("No file loaded", juce::dontSendNotification);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
     statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xffd6dde3));
     addAndMakeVisible (statusLabel);
+
+    gazeStatusLabel.setJustificationType (juce::Justification::centredRight);
+    gazeStatusLabel.setColour (juce::Label::textColourId, juce::Colour (0xfff2b84b));
+    gazeStatusLabel.setVisible (false);
+    addAndMakeVisible (gazeStatusLabel);
 
     for (size_t i = 0; i < bandGroups.size(); ++i)
     {
@@ -114,11 +127,98 @@ void PluginEditor::paint (juce::Graphics& g)
                                    juce::Colour (0xff101113), bounds.getBottomRight(), false);
     g.setGradientFill (gradient);
     g.fillRect (bounds);
+
+    if (eyeTracker.isEnabled())
+    {
+        auto guide = getLocalBounds().toFloat();
+        const auto centre = guide.getCentre();
+
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.drawVerticalLine (juce::roundToInt (centre.x), guide.getY(), guide.getBottom());
+        g.drawHorizontalLine (juce::roundToInt (centre.y), guide.getX(), guide.getRight());
+
+        g.setColour (juce::Colour (0xfff2b84b).withAlpha (0.55f));
+        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        g.drawText ("MID -", guide.withTrimmedRight (guide.getWidth() * 0.5f).withHeight (30.0f),
+                    juce::Justification::centredLeft);
+        g.drawText ("MID +", guide.withTrimmedLeft (guide.getWidth() * 0.5f).withHeight (30.0f),
+                    juce::Justification::centredRight);
+        g.drawText ("LOW -", guide.withTrimmedRight (guide.getWidth() * 0.5f).withTop (guide.getBottom() - 30.0f),
+                    juce::Justification::centredLeft);
+        g.drawText ("LOW +", guide.withTrimmedLeft (guide.getWidth() * 0.5f).withTop (guide.getBottom() - 30.0f),
+                    juce::Justification::centredRight);
+    }
 }
 
 void PluginEditor::timerCallback()
 {
+    if (eyeTracker.isEnabled())
+    {
+        eyeTracker.update();
+
+        if (eyeTracker.hasValidGaze())
+        {
+            applyEyeControlAction (eyeTracker.getActiveAction());
+
+            gazeStatusLabel.setText (
+                eyeTracker.getSourceStatus() + " | "
+                    + eyeTracker.getActionDescription()
+                    + " | " + juce::String (eyeTracker.getDwellProgress() * 100.0f, 0) + "%",
+                juce::dontSendNotification);
+        }
+    }
+
     updateStatusText();
+    repaint();
+}
+
+void PluginEditor::applyEyeControlAction (EyeTrackerManager::Action action)
+{
+    if (action == EyeTrackerManager::Action::none)
+        return;
+
+    auto* lowParameter = processorRef.parameters.getParameter ("freqLow");
+    auto* midParameter = processorRef.parameters.getParameter ("freqMid");
+
+    if (lowParameter == nullptr || midParameter == nullptr)
+        return;
+
+    auto lowFrequency = lowParameter->convertFrom0to1 (lowParameter->getValue());
+    auto midFrequency = midParameter->convertFrom0to1 (midParameter->getValue());
+    constexpr auto frequencyStep = 1.025f;
+    constexpr auto minimumGapRatio = 1.25f;
+
+    switch (action)
+    {
+        case EyeTrackerManager::Action::decreaseMid:
+            midFrequency = juce::jmax (lowFrequency * minimumGapRatio, midFrequency / frequencyStep);
+            setParameterValue ("freqMid", midFrequency);
+            break;
+
+        case EyeTrackerManager::Action::increaseMid:
+            midFrequency = juce::jmin (12000.0f, midFrequency * frequencyStep);
+            setParameterValue ("freqMid", midFrequency);
+            break;
+
+        case EyeTrackerManager::Action::decreaseLow:
+            lowFrequency = juce::jmax (40.0f, lowFrequency / frequencyStep);
+            setParameterValue ("freqLow", lowFrequency);
+            break;
+
+        case EyeTrackerManager::Action::increaseLow:
+            lowFrequency = juce::jmin (midFrequency / minimumGapRatio, lowFrequency * frequencyStep);
+            setParameterValue ("freqLow", lowFrequency);
+            break;
+
+        case EyeTrackerManager::Action::none:
+            break;
+    }
+}
+
+void PluginEditor::setParameterValue (const juce::String& parameterId, float value)
+{
+    if (auto* parameter = processorRef.parameters.getParameter (parameterId))
+        parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
 }
 
 void PluginEditor::openAudioFile()
@@ -197,6 +297,8 @@ void PluginEditor::resized()
     playButton.setBounds (transportArea.removeFromLeft (90).reduced (4));
     stopButton.setBounds (transportArea.removeFromLeft (90).reduced (4));
     recordButton.setBounds (transportArea.removeFromLeft (130).reduced (4));
+    eyeControlButton.setBounds (transportArea.removeFromLeft (230).reduced (4));
+    gazeStatusLabel.setBounds (transportArea.removeFromRight (260).reduced (4));
     statusLabel.setBounds (transportArea.reduced (10, 4));
     area.removeFromTop (8);
 

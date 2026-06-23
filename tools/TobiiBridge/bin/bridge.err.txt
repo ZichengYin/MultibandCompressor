@@ -1,0 +1,3 @@
+Tobii.StreamEngine.TobiiApiException: Attempt to use a feature which is not supported.
+   дк Tobii.StreamEngine.EyeTracker.add_GazeData(tobii_gaze_data_callback_t value)
+   дк TobiiBridge.Main()
